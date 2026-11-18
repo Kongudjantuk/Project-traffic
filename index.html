@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traffic & Checkpoint Monitor Pro</title>
+
+    <!-- Fonts & Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Sarabun:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Sarabun', 'Inter', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'] },
+                    colors: { slate: { 850: '#151e2e', 900: '#0f172a' } }
+                }
+            }
+        }
+    </script>
+
+    <!-- Leaflet Map, Chart.js, ExcelJS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        .leaflet-layer, .leaflet-control-zoom-in, .leaflet-control-zoom-out, .leaflet-control-attribution {
+            filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 h-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="flex items-center justify-between px-5 py-3 border-b border-slate-800 bg-slate-900 shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
+                <i class="fas fa-shield-alt text-lg"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold text-white leading-tight">Traffic & Checkpoint <span class="text-cyan-400">Monitor Pro</span></h1>
+                <p class="text-[11px] text-slate-400">Real-time Corridor, Traffic & Checkpoint Management System</p>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+            <button onclick="simulateTraffic()" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition shadow-lg">
+                <i class="fas fa-magic"></i> จำลองเหตุการณ์
+            </button>
+            <button onclick="openAddModal()" class="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition">
+                <i class="fas fa-plus-circle"></i> เพิ่มจุดตรวจ / ด่าน
+            </button>
+            <button onclick="exportExcel()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition">
+                <i class="fas fa-file-excel"></i> Export Report
+            </button>
+        </div>
+    </header>
+
+    <!-- Alert Banner -->
+    <div id="alert-banner" class="bg-red-500/10 border-b border-red-500/30 px-5 py-2 flex items-center justify-between text-xs shrink-0 hidden">
+        <div class="flex items-center gap-2 text-red-400 font-semibold">
+            <i class="fas fa-triangle-exclamation animate-bounce"></i>
+            <span>แจ้งเตือนจุดวิกฤต: พบเส้นทางการจราจรติดขัดสะสม <span id="alert-count" class="underline font-bold">0</span> จุด!</span>
+        </div>
+        <span class="text-[10px] text-slate-400 font-mono">Auto-sync ทุก 5 วินาที</span>
+    </div>
+
+    <!-- Main Workspace -->
+    <div class="flex-1 p-3 grid grid-cols-1 lg:grid-cols-12 gap-3 overflow-hidden">
+        
+        <!-- ฝั่งซ้าย: แผนที่ -->
+        <div class="lg:col-span-7 bg-slate-850 border border-slate-800 rounded-xl flex flex-col overflow-hidden shadow-lg relative">
+            <div class="px-4 py-2.5 border-b border-slate-800 flex justify-between items-center bg-slate-900/60">
+                <span class="text-xs font-bold text-white flex items-center gap-2">
+                    <i class="fas fa-map-marked-alt text-cyan-400"></i> แผนที่แสดงพิกัด (คลิกบนแผนที่เพื่อดึงพิกัด Lat/Lng)
+                </span>
+                <span id="coord-preview" class="text-[11px] font-mono text-cyan-400">พิกัดเริ่มต้น: 13.004120, 101.144510</span>
+            </div>
+            <div id="map" class="flex-1 w-full z-10"></div>
+        </div>
+
+        <!-- ฝั่งขวา: KPI + Search + Table + Chart -->
+        <div class="lg:col-span-5 flex flex-col gap-3 overflow-hidden">
+            
+            <!-- KPI Cards -->
+            <div class="grid grid-cols-4 gap-2 shrink-0">
+                <div class="bg-slate-850 border border-emerald-500/30 rounded-xl p-2.5 flex flex-col justify-between">
+                    <p class="text-[10px] text-slate-400">🟢 คล่องตัว</p>
+                    <p id="kpi-green" class="text-xl font-mono font-bold text-emerald-400">0</p>
+                </div>
+                <div class="bg-slate-850 border border-amber-500/30 rounded-xl p-2.5 flex flex-col justify-between">
+                    <p class="text-[10px] text-slate-400">🟡 หนาแน่น</p>
+                    <p id="kpi-yellow" class="text-xl font-mono font-bold text-amber-400">0</p>
+                </div>
+                <div class="bg-slate-850 border border-red-500/30 rounded-xl p-2.5 flex flex-col justify-between">
+                    <p class="text-[10px] text-slate-400">🔴 ติดขัด</p>
+                    <p id="kpi-red" class="text-xl font-mono font-bold text-red-400">0</p>
+                </div>
+                <div class="bg-slate-850 border border-blue-500/30 rounded-xl p-2.5 flex flex-col justify-between">
+                    <p class="text-[10px] text-slate-400">🛡️ ด่านตรวจ</p>
+                    <p id="kpi-checkpoint" class="text-xl font-mono font-bold text-blue-400">0</p>
+                </div>
+            </div>
+
+            <!-- ช่องค้นหา & ตัวกรอง -->
+            <div class="bg-slate-850 border border-slate-800 rounded-xl p-2.5 flex gap-2 shrink-0">
+                <div class="relative flex-1">
+                    <i class="fas fa-search absolute left-3 top-2.5 text-slate-500 text-xs"></i>
+                    <input type="text" id="search-input" oninput="renderUI()" placeholder="ค้นหาชื่อถนน, จุดตรวจ, ด่าน..." class="w-full bg-slate-900 border border-slate-700 text-xs text-white rounded-lg pl-8 pr-3 py-2 outline-none focus:border-cyan-400">
+                </div>
+                <select id="filter-status" onchange="renderUI()" class="bg-slate-900 border border-slate-700 text-xs text-white rounded-lg px-2 py-2 outline-none focus:border-cyan-400">
+                    <option value="all">ทุกสถานะ/ประเภท</option>
+                    <option value="green">🟢 คล่องตัว</option>
+                    <option value="yellow">🟡 หนาแน่น</option>
+                    <option value="red">🔴 ติดขัด</option>
+                    <option value="checkpoint">🛡️ ด่านตรวจ</option>
+                </select>
+            </div>
+
+            <!-- ตารางรายการ -->
+            <div class="flex-1 bg-slate-850 border border-slate-800 rounded-xl flex flex-col overflow-hidden shadow-lg">
+                <div class="px-4 py-2 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
+                    <h2 class="text-xs font-bold text-white"><i class="fas fa-list text-cyan-400 mr-1.5"></i> รายการจุดตรวจวัดและด่านความมั่นคง</h2>
+                    <span class="text-[10px] text-emerald-400 font-mono">● Live DB</span>
+                </div>
+                <div class="flex-1 overflow-y-auto custom-scrollbar">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead class="bg-slate-900/90 sticky top-0 text-slate-400 text-[10px] uppercase border-b border-slate-800">
+                            <tr>
+                                <th class="py-2 px-3">เส้นทาง / จุดตรวจ</th>
+                                <th class="py-2 px-2 text-center">สถานะ / ประเภท</th>
+                                <th class="py-2 px-2 text-right">ความเร็ว</th>
+                                <th class="py-2 px-3 text-center">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="traffic-table-body" class="divide-y divide-slate-800/60"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- กราฟความเร็ว -->
+            <div class="h-32 bg-slate-850 border border-slate-800 rounded-xl p-3 flex flex-col shrink-0">
+                <h3 class="text-xs font-bold text-white mb-1"><i class="fas fa-chart-bar text-purple-400 mr-1.5"></i> ความเร็วเฉลี่ยแต่ละจุด (km/h)</h3>
+                <div class="relative flex-1 w-full">
+                    <canvas id="speedChart"></canvas>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Modal เพิ่มจุดตรวจ / ด่าน -->
+    <div id="add-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center z-50">
+        <div class="bg-slate-850 border border-slate-700 rounded-xl w-full max-w-md p-5 shadow-2xl">
+            <div class="flex justify-between items-center border-b border-slate-700 pb-3 mb-4">
+                <h3 class="text-white font-bold text-sm"><i class="fas fa-shield-alt text-cyan-400 mr-1.5"></i> บันทึกจุดตรวจวัด / ด่านความมั่นคง</h3>
+                <button onclick="closeAddModal()" class="text-slate-400 hover:text-white"><i class="fas fa-times"></i></button>
+            </div>
+            <form id="traffic-form" onsubmit="submitTraffic(event)" class="space-y-3 text-xs">
+                <div>
+                    <label class="block text-slate-400 mb-1">ชื่อถนน / สายทาง</label>
+                    <input type="text" id="inp-road" required placeholder="เช่น ถนนสุขุมวิท, ทางหลวง 331" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white outline-none focus:border-cyan-400">
+                </div>
+                <div>
+                    <label class="block text-slate-400 mb-1">จุดสังเกต / รายละเอียดด่าน</label>
+                    <input type="text" id="inp-loc" required placeholder="เช่น ด่านตรวจความมั่นคง สภ.ปลวกแดง" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white outline-none focus:border-cyan-400">
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-slate-400 mb-1">Latitude</label>
+                        <input type="number" step="any" id="inp-lat" required value="13.004120" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">Longitude</label>
+                        <input type="number" step="any" id="inp-lng" required value="101.144510" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-slate-400 mb-1">สถานะ / ประเภทจุด</label>
+                        <select id="inp-status" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white">
+                            <option value="green">🟢 คล่องตัว (Green)</option>
+                            <option value="yellow">🟡 หนาแน่น (Yellow)</option>
+                            <option value="red">🔴 ติดขัด (Red)</option>
+                            <option value="checkpoint">🛡️ ด่านตรวจ / จุดสกัด</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">ความเร็วเฉลี่ย (km/h)</label>
+                        <input type="number" id="inp-speed" required value="60" min="0" max="150" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-slate-400 mb-1">หมายเหตุ / รายละเอียดด่าน</label>
+                    <input type="text" id="inp-note" placeholder="เช่น ตรวจวัดแอลกอฮอล์, ตรวจกะเปลี่ยนพนักงาน" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white">
+                </div>
+                <div class="pt-2 flex justify-end gap-2">
+                    <button type="button" onclick="closeAddModal()" class="px-4 py-2 bg-slate-700 text-white rounded-lg">ยกเลิก</button>
+                    <button type="submit" id="btn-submit" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg">บันทึกข้อมูล</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let allData = [];
+        let markersLayer = L.layerGroup();
+        let clickedLat = 13.004120, clickedLng = 101.144510;
+
+        const map = L.map('map').setView([13.015, 101.050], 11);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }).addTo(map);
+        markersLayer.addTo(map);
+
+        map.on('click', function(e) {
+            clickedLat = e.latlng.lat.toFixed(6);
+            clickedLng = e.latlng.lng.toFixed(6);
+            document.getElementById('coord-preview').innerText = `พิกัดที่เลือก: ${clickedLat}, ${clickedLng}`;
+            document.getElementById('inp-lat').value = clickedLat;
+            document.getElementById('inp-lng').value = clickedLng;
+        });
+
+        const ctx = document.getElementById('speedChart').getContext('2d');
+        const speedChart = new Chart(ctx, {
+            type: 'bar',
+            data: { labels: [], datasets: [{ label: 'ความเร็ว (km/h)', data: [], backgroundColor: [], borderRadius: 4 }] },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { ticks: { color: '#94a3b8', font: { size: 9 } }, grid: { display: false } },
+                    y: { beginAtZero: true, max: 120, ticks: { color: '#94a3b8', font: { size: 9 } }, grid: { color: '#1e293b' } }
+                }
+            }
+        });
+
+        async function fetchTrafficData() {
+            try {
+                const res = await fetch('api.php?action=list');
+                const json = await res.json();
+                if (json.status === 'success') {
+                    allData = json.data;
+                    renderUI();
+                } else {
+                    console.error('API Error:', json.message);
+                }
+            } catch (err) {
+                console.error('Fetch Error:', err);
+            }
+        }
+
+        function renderUI() {
+            const filter = document.getElementById('filter-status').value;
+            const keyword = document.getElementById('search-input').value.toLowerCase();
+
+            let filtered = allData.filter(d => {
+                const matchStatus = filter === 'all' || d.status === filter;
+                const matchText = d.road_name.toLowerCase().includes(keyword) || d.location_detail.toLowerCase().includes(keyword);
+                return matchStatus && matchText;
+            });
+
+            const redCount = allData.filter(d => d.status === 'red').length;
+            document.getElementById('kpi-green').innerText = allData.filter(d => d.status === 'green').length;
+            document.getElementById('kpi-yellow').innerText = allData.filter(d => d.status === 'yellow').length;
+            document.getElementById('kpi-red').innerText = redCount;
+            document.getElementById('kpi-checkpoint').innerText = allData.filter(d => d.status === 'checkpoint').length;
+
+            const alertBanner = document.getElementById('alert-banner');
+            if (redCount > 0) {
+                alertBanner.classList.remove('hidden');
+                document.getElementById('alert-count').innerText = redCount;
+            } else {
+                alertBanner.classList.add('hidden');
+            }
+
+            markersLayer.clearLayers();
+            const colorMap = { green: '#10b981', yellow: '#f59e0b', red: '#ef4444', checkpoint: '#3b82f6' };
+            const labelMap = { green: 'คล่องตัว', yellow: 'หนาแน่น', red: 'ติดขัด', checkpoint: '🛡️ ด่านตรวจ / จุดสกัด' };
+
+            filtered.forEach(item => {
+                const color = colorMap[item.status] || '#22d3ee';
+                const marker = L.circleMarker([item.lat, item.lng], {
+                    radius: item.status === 'checkpoint' ? 12 : 10,
+                    fillColor: color, color: '#ffffff', weight: 2, opacity: 1, fillOpacity: 0.9
+                }).bindPopup(`
+                    <div style="color:#0f172a; font-family:Sarabun,sans-serif; min-width:180px;">
+                        <b style="font-size:13px;">${item.road_name}</b><br>
+                        <span style="font-size:11px; color:#475569;">${item.location_detail}</span><hr style="margin:4px 0;">
+                        ประเภท: <b style="color:${color};">${labelMap[item.status]}</b><br>
+                        ความเร็วเฉลี่ย: ${item.avg_speed} km/h<br>
+                        <span style="font-size:11px;">หมายเหตุ: ${item.note}</span>
+                    </div>
+                `);
+                markersLayer.addLayer(marker);
+            });
+
+            const tbody = document.getElementById('traffic-table-body');
+            tbody.innerHTML = filtered.map(item => {
+                let badge = '';
+                if(item.status === 'green') badge = '<span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px]">คล่องตัว</span>';
+                else if(item.status === 'yellow') badge = '<span class="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 text-[10px]">หนาแน่น</span>';
+                else if(item.status === 'red') badge = '<span class="px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/40 text-[10px]">ติดขัด</span>';
+                else badge = '<span class="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 text-[10px]">🛡️ ด่านตรวจ</span>';
+
+                return `
+                    <tr class="hover:bg-slate-800/50 cursor-pointer transition" onclick="focusMap(${item.lat}, ${item.lng})">
+                        <td class="py-2 px-3">
+                            <div class="font-bold text-white">${item.road_name}</div>
+                            <div class="text-[10px] text-slate-400">${item.location_detail}</div>
+                        </td>
+                        <td class="py-2 px-2 text-center">${badge}</td>
+                        <td class="py-2 px-2 text-right font-mono font-bold text-cyan-400">${item.avg_speed} <span class="text-[10px] text-slate-500">km/h</span></td>
+                        <td class="py-2 px-3 text-center" onclick="event.stopPropagation()">
+                            <button onclick="quickCycleStatus(${item.id}, '${item.status}')" class="text-slate-400 hover:text-amber-400 mr-2" title="เปลี่ยนสถานะ"><i class="fas fa-sync"></i></button>
+                            <button onclick="deleteCheckpoint(${item.id})" class="text-slate-400 hover:text-red-400" title="ลบ"><i class="fas fa-trash"></i></button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            speedChart.data.labels = filtered.map(d => d.road_name.substring(0, 10) + '...');
+            speedChart.data.datasets[0].data = filtered.map(d => d.avg_speed);
+            speedChart.data.datasets[0].backgroundColor = filtered.map(d => colorMap[d.status]);
+            speedChart.update();
+        }
+
+        function focusMap(lat, lng) { map.flyTo([lat, lng], 14, { duration: 1 }); }
+
+        async function quickCycleStatus(id, currentStatus) {
+            const nextStatus = currentStatus === 'green' ? 'yellow' : currentStatus === 'yellow' ? 'red' : currentStatus === 'red' ? 'checkpoint' : 'green';
+            const nextSpeed = nextStatus === 'green' ? 80 : nextStatus === 'yellow' ? 35 : nextStatus === 'red' ? 15 : 20;
+            const item = allData.find(d => d.id == id);
+            await fetch('api.php?action=update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: id, status: nextStatus, avg_speed: nextSpeed, note: item.note })
+            });
+            fetchTrafficData();
+        }
+
+        async function simulateTraffic() {
+            if(allData.length === 0) return;
+            const randomItem = allData[Math.floor(Math.random() * allData.length)];
+            await fetch('api.php?action=update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: randomItem.id, status: 'red', avg_speed: 10, note: '⚠️ จำลองอุบัติเหตุ / รถติดกะทันหัน' })
+            });
+            fetchTrafficData();
+        }
+
+        async function submitTraffic(e) {
+            e.preventDefault();
+            const btn = document.getElementById('btn-submit');
+            btn.innerText = 'กำลังบันทึก...';
+            btn.disabled = true;
+
+            const payload = {
+                road_name: document.getElementById('inp-road').value,
+                location_detail: document.getElementById('inp-loc').value,
+                lat: document.getElementById('inp-lat').value,
+                lng: document.getElementById('inp-lng').value,
+                status: document.getElementById('inp-status').value,
+                avg_speed: document.getElementById('inp-speed').value,
+                note: document.getElementById('inp-note').value
+            };
+
+            try {
+                const res = await fetch('api.php?action=add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await res.json();
+                if (result.status === 'success') {
+                    closeAddModal();
+                    document.getElementById('traffic-form').reset();
+                    document.getElementById('inp-lat').value = clickedLat;
+                    document.getElementById('inp-lng').value = clickedLng;
+                    await fetchTrafficData();
+                } else {
+                    alert('บันทึกไม่สำเร็จ: ' + result.message);
+                }
+            } catch (err) {
+                alert('เชื่อมต่อ api.php ล้มเหลว กรุณาเช็ก XAMPP');
+            } finally {
+                btn.innerText = 'บันทึกข้อมูล';
+                btn.disabled = false;
+            }
+        }
+
+        async function deleteCheckpoint(id) {
+            if (!confirm('ลบจุดนี้?')) return;
+            await fetch(`api.php?action=delete&id=${id}`);
+            fetchTrafficData();
+        }
+
+        function openAddModal() { document.getElementById('add-modal').classList.remove('hidden'); document.getElementById('add-modal').classList.add('flex'); }
+        function closeAddModal() { document.getElementById('add-modal').classList.add('hidden'); document.getElementById('add-modal').classList.remove('flex'); }
+
+        async function exportExcel() {
+            const workbook = new ExcelJS.Workbook();
+            const sheet = workbook.addWorksheet('Traffic & Checkpoint Report');
+            sheet.columns = [
+                { header: 'ID', key: 'id', width: 8 },
+                { header: 'ชื่อเส้นทาง', key: 'road_name', width: 30 },
+                { header: 'จุดสังเกต / รายละเอียดด่าน', key: 'location_detail', width: 30 },
+                { header: 'สถานะ / ประเภท', key: 'status', width: 15 },
+                { header: 'ความเร็วเฉลี่ย (km/h)', key: 'avg_speed', width: 20 },
+                { header: 'หมายเหตุ', key: 'note', width: 30 }
+            ];
+            allData.forEach(row => sheet.addRow(row));
+            sheet.getRow(1).font = { bold: true };
+            const buffer = await workbook.xlsx.writeBuffer();
+            saveAs(new Blob([buffer]), `Traffic_Checkpoint_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
+        }
+
+        setInterval(fetchTrafficData, 5000);
+        fetchTrafficData();
+    </script>
+</body>
+</html>
