@@ -211,6 +211,7 @@
     </div>
 
     <script>
+        const API_URL = "https://traffic-monitor-pro.gamer.free/api.php";
         let allData = [];
         let markersLayer = L.layerGroup();
         let clickedLat = 13.004120, clickedLng = 101.144510;
@@ -243,7 +244,7 @@
 
         async function fetchTrafficData() {
             try {
-                const res = await fetch('api.php?action=list');
+                const res = await fetch(`${API_URL}?action=list`);
                 const json = await res.json();
                 if (json.status === 'success') {
                     allData = json.data;
@@ -337,7 +338,7 @@
             const nextStatus = currentStatus === 'green' ? 'yellow' : currentStatus === 'yellow' ? 'red' : currentStatus === 'red' ? 'checkpoint' : 'green';
             const nextSpeed = nextStatus === 'green' ? 80 : nextStatus === 'yellow' ? 35 : nextStatus === 'red' ? 15 : 20;
             const item = allData.find(d => d.id == id);
-            await fetch('api.php?action=update', {
+            await fetch(`${API_URL}?action=update`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ id: id, status: nextStatus, avg_speed: nextSpeed, note: item.note })
@@ -348,7 +349,7 @@
         async function simulateTraffic() {
             if(allData.length === 0) return;
             const randomItem = allData[Math.floor(Math.random() * allData.length)];
-            await fetch('api.php?action=update', {
+            await fetch(`${API_URL}?action=update`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ id: randomItem.id, status: 'red', avg_speed: 10, note: '⚠️ จำลองอุบัติเหตุ / รถติดกะทันหัน' })
@@ -373,7 +374,7 @@
             };
 
             try {
-                const res = await fetch('api.php?action=add', {
+                const res = await fetch(`${API_URL}?action=add`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
@@ -389,7 +390,7 @@
                     alert('บันทึกไม่สำเร็จ: ' + result.message);
                 }
             } catch (err) {
-                alert('เชื่อมต่อ api.php ล้มเหลว กรุณาเช็ก XAMPP');
+                alert('เชื่อมต่อ api.php ล้มเหลว กรุณาเช็กการเชื่อมต่อเซิร์ฟเวอร์');
             } finally {
                 btn.innerText = 'บันทึกข้อมูล';
                 btn.disabled = false;
@@ -398,7 +399,7 @@
 
         async function deleteCheckpoint(id) {
             if (!confirm('ลบจุดนี้?')) return;
-            await fetch(`api.php?action=delete&id=${id}`);
+            await fetch(`${API_URL}?action=delete&id=${id}`);
             fetchTrafficData();
         }
 
